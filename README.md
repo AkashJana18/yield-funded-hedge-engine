@@ -16,6 +16,14 @@ npm run dev
 ```
 
 The frontend runs at `http://localhost:5173` and the backend runs at `http://localhost:4000`.
+If your browser resolves `localhost` oddly, use `http://127.0.0.1:5173`.
+The frontend defaults to calling the backend on the same hostname and port `4000`, so LAN URLs such as `http://192.168.x.x:5173` call `http://192.168.x.x:4000`.
+
+To point the frontend at a different API URL:
+
+```bash
+VITE_API_URL=http://localhost:4000 npm run dev:web
+```
 
 To run them separately:
 

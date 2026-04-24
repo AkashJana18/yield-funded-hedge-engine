@@ -1,6 +1,6 @@
 import type { SimulationRequest, SimulationResponse } from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? getDefaultApiBaseUrl();
 
 export async function simulatePortfolio(
   payload: SimulationRequest,
@@ -25,4 +25,8 @@ export async function simulatePortfolio(
   }
 
   return data as SimulationResponse;
+}
+
+function getDefaultApiBaseUrl(): string {
+  return `${window.location.protocol}//${window.location.hostname}:4000`;
 }
