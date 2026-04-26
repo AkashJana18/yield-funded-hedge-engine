@@ -8,7 +8,7 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace @sol-hedge/server\" \"npm run dev --workspace @sol-hedge/web\"",
+    "dev": "node scripts/stop-dev-ports.mjs && concurrently \"npm run dev --workspace @sol-hedge/server\" \"npm run dev --workspace @sol-hedge/web\"",
     "dev:server": "npm run dev --workspace @sol-hedge/server",
     "dev:web": "npm run dev --workspace @sol-hedge/web",
     "build": "npm run build --workspace @sol-hedge/server && npm run build --workspace @sol-hedge/web",

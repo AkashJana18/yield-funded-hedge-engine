@@ -28,4 +28,5 @@ export interface SimulationResponse {
   unhedged: number[];
   hedged: number[];
   metrics: SimulationMetrics;
+  source?: "simulated" | "birdeye" | "coingecko";
 }

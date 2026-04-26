@@ -10,3 +10,4 @@ coverage
 .agents
 codex-session.jsonl
 .git
+scripts
