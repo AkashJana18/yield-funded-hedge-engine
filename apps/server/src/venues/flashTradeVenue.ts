@@ -4,7 +4,7 @@ import {
   calculateLiquidationDistance,
   calculateMarginRequired,
   estimateShortLiquidationPrice
-} from "../services/risk.service.js";
+} from "../services/riskEngine.js";
 import type {
   ClosePositionParams,
   OpenShortParams,

@@ -32,3 +32,14 @@ export function formatSignedPercent(value: number): string {
   const formatted = formatPercent(Math.abs(value));
   return value >= 0 ? `+${formatted}` : `-${formatted}`;
 }
+
+export function formatTokenAmount(value: number, maximumFractionDigits = 4): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits
+  }).format(value);
+}
+
+export function formatTx(signature: string): string {
+  return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
+}

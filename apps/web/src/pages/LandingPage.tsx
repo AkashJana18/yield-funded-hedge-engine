@@ -3,13 +3,13 @@ import { Link } from "react-router-dom";
 
 const features = [
   {
-    title: "Real market data by Birdeye",
-    body: "Live SOL price and historical series feed the simulator and hedge preview.",
+    title: "CoinGecko plus Birdeye data",
+    body: "CoinGecko powers replay while Birdeye powers cached live SOL pricing.",
     icon: RadioTower
   },
   {
-    title: "Flash Trade adapter",
-    body: "Preview short SOL perp protection through a venue interface built for safe execution.",
+    title: "Flash and Phoenix perps",
+    body: "Compare paper short routes by hedge cost, funding, depth, and liquidation distance.",
     icon: ShieldCheck
   },
   {
@@ -55,7 +55,7 @@ export function LandingPage() {
                 Put a floor under your SOL.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-neutral-300">
-                Simulate and preview yield-funded downside protection using real Solana market data.
+                Simulate SOL downside protection and compare paper perp hedges with live market context.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link
@@ -69,7 +69,7 @@ export function LandingPage() {
                   to="/hedge"
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-5 text-sm font-semibold text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950"
                 >
-                  Preview One-Click Hedge
+                  Compare Hedge Routes
                   <ShieldCheck className="h-4 w-4" aria-hidden="true" />
                 </Link>
               </div>

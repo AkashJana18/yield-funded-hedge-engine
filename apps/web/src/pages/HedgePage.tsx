@@ -1,361 +1,498 @@
-import { AlertCircle, CheckCircle2, Loader2, ShieldCheck, Wallet } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { useWallet } from "@solana/wallet-adapter-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Loader2,
+  RefreshCcw,
+  ShieldAlert,
+  ShieldCheck
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { fetchSolLivePrice, fetchWalletBalance, openHedge, previewHedge } from "../api";
-import type { HedgePreviewResponse, HedgeVenue, OpenHedgeResponse, SolLivePrice } from "../types";
-import { formatCurrencyPrecise, formatPercent } from "../utils/format";
+import {
+  calculatePortfolioMetrics,
+  fetchHedgeRoutes,
+  fetchSolLivePrice,
+  fetchWalletBalance,
+  paperExecuteHedge,
+  simulatePortfolio
+} from "../api";
+import { DEFAULT_SLIPPAGE_BPS, FLASH_DEFAULT_LEVERAGE, HEDGE_RATIOS } from "../constants";
+import type {
+  HedgeRouteId,
+  HedgeRouteQuote,
+  HedgeRoutesResponse,
+  PaperExecuteHedgeResponse,
+  PortfolioMetrics,
+  SimulationResponse,
+  SolLivePrice,
+  TokenBalance,
+  VenuePosition,
+  WalletBalanceResponse
+} from "../types";
+import {
+  formatCurrencyPrecise,
+  formatPercent,
+  formatSignedCurrency,
+  formatSignedPercent,
+  formatTokenAmount
+} from "../utils/format";
 
-type Leverage = 1 | 2 | 3;
+type RouteLoadState = "idle" | "loading" | "ready" | "error";
 
-const hedgeLevels = [0.25, 0.5, 0.75, 1] as const;
-const leverages = [1, 2, 3] as const;
+const POSITION_STORAGE_KEY = "floorfi:last-paper-position";
 
 export function HedgePage() {
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [walletLabel, setWalletLabel] = useState("Connect wallet");
-  const [solBalance, setSolBalance] = useState<number | null>(null);
-  const [capitalUsd, setCapitalUsd] = useState("10000");
-  const [hedgePercent, setHedgePercent] = useState<(typeof hedgeLevels)[number]>(0.5);
-  const [stakingYield, setStakingYield] = useState("7");
+  const wallet = useWallet();
+  const [amount, setAmount] = useState("10");
+  const [hedgeRatio, setHedgeRatio] = useState<(typeof HEDGE_RATIOS)[number]>(0.5);
+  const [slippageBps, setSlippageBps] = useState(DEFAULT_SLIPPAGE_BPS);
+  const [leverage, setLeverage] = useState<1 | 2 | 3>(FLASH_DEFAULT_LEVERAGE);
   const [fundingRate, setFundingRate] = useState("4");
-  const [leverage, setLeverage] = useState<Leverage>(1);
-  const [venue, setVenue] = useState<HedgeVenue>("mock");
   const [livePrice, setLivePrice] = useState<SolLivePrice | null>(null);
-  const [preview, setPreview] = useState<HedgePreviewResponse | null>(null);
-  const [opened, setOpened] = useState<OpenHedgeResponse | null>(null);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [isOpening, setIsOpening] = useState(false);
+  const [balances, setBalances] = useState<WalletBalanceResponse | null>(null);
+  const [routes, setRoutes] = useState<HedgeRoutesResponse | null>(null);
+  const [routeState, setRouteState] = useState<RouteLoadState>("idle");
+  const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
+  const [portfolioMetrics, setPortfolioMetrics] = useState<PortfolioMetrics | null>(null);
+  const [paperExecution, setPaperExecution] = useState<PaperExecuteHedgeResponse | null>(null);
+  const [trackedPosition, setTrackedPosition] = useState<VenuePosition | null>(() => loadStoredPosition());
+  const [executeLoading, setExecuteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchSolLivePrice(controller.signal)
-      .then(setLivePrice)
-      .catch((fetchError) => {
-        if (!(fetchError instanceof DOMException && fetchError.name === "AbortError")) {
-          setError(fetchError instanceof Error ? fetchError.message : "Unable to fetch SOL price.");
-        }
-      });
+  const parsedAmount = parseAmount(amount);
+  const walletAddress = wallet.publicKey?.toBase58();
+  const usdcBalance = findBalance(balances?.balances, "USDC");
+  const solBalance = findBalance(balances?.balances, "SOL");
+  const msolBalance = findBalance(balances?.balances, "mSOL");
+  const jitoBalance = findBalance(balances?.balances, "JitoSOL");
+  const activePrice = routes?.livePrice.priceUsd ?? livePrice?.priceUsd ?? null;
+  const availableUsdc = usdcBalance?.balance;
+  const solExposureUsd = activePrice && Number.isFinite(parsedAmount) ? parsedAmount * activePrice : 0;
+  const fundingRateValue = parseAmount(fundingRate) / 100;
+  const recommendedRoute = routes?.routes.find((route) => route.id === routes.recommendedRouteId) ?? null;
+  const flashRoute = routes?.routes.find((route) => route.id === "flash_perp_short") ?? null;
+  const phoenixRoute = routes?.routes.find((route) => route.id === "phoenix_perp_short") ?? null;
+  const displayedPosition = useMemo(() => {
+    const position = trackedPosition ?? paperExecution?.position ?? null;
+    return position && activePrice ? refreshPosition(position, activePrice) : position;
+  }, [activePrice, paperExecution?.position, trackedPosition]);
+  const highRisk = Boolean(recommendedRoute?.riskWarnings.some((warning) => warning.severity === "danger"));
 
-    return () => controller.abort();
+  const refreshBalances = useCallback(async () => {
+    if (!walletAddress) {
+      setBalances(null);
+      return;
+    }
+
+    const nextBalances = await fetchWalletBalance(walletAddress);
+    setBalances(nextBalances);
+  }, [walletAddress]);
+
+  const refreshLivePrice = useCallback(async () => {
+    const nextLivePrice = await fetchSolLivePrice();
+    setLivePrice(nextLivePrice);
   }, []);
 
-  async function connectWallet() {
-    setError(null);
+  useEffect(() => {
+    void refreshLivePrice().catch((priceError) => {
+      setError(priceError instanceof Error ? priceError.message : "Unable to load live SOL price.");
+    });
 
-    if (!window.solana) {
-      const paperWallet = "PaperMode111111111111111111111111111111111";
-      setWalletAddress(paperWallet);
-      setWalletLabel("Paper wallet");
-      setSolBalance(null);
-      return;
-    }
+    const interval = window.setInterval(() => {
+      void refreshLivePrice().catch(() => undefined);
+    }, 20_000);
 
-    try {
-      const response = await window.solana.connect();
-      const address = response.publicKey.toString();
-      setWalletAddress(address);
-      setWalletLabel(shortAddress(address));
-      const balance = await fetchWalletBalance(address);
-      setSolBalance(balance.solBalance);
-    } catch (connectError) {
-      setError(connectError instanceof Error ? connectError.message : "Unable to connect wallet.");
-    }
-  }
+    return () => window.clearInterval(interval);
+  }, [refreshLivePrice]);
 
-  async function handlePreview() {
-    const payload = buildPreviewPayload();
+  useEffect(() => {
+    void refreshBalances().catch((balanceError) => {
+      setError(balanceError instanceof Error ? balanceError.message : "Unable to fetch wallet balances.");
+    });
+  }, [refreshBalances]);
 
-    if (!payload) {
-      return;
-    }
-
+  useEffect(() => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setIsPreviewing(true);
-    setError(null);
-    setOpened(null);
 
-    try {
-      const response = await previewHedge(payload, controller.signal);
-      setPreview(response);
-      setLivePrice({
-        symbol: "SOL",
-        priceUsd: response.solPrice,
-        source: "birdeye",
-        timestamp: new Date().toISOString()
-      });
-    } catch (previewError) {
-      if (!(previewError instanceof DOMException && previewError.name === "AbortError")) {
-        setError(previewError instanceof Error ? previewError.message : "Unable to preview hedge.");
+    async function loadRoutes() {
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        setRoutes(null);
+        setRouteState("idle");
+        return;
       }
-    } finally {
-      if (abortRef.current === controller) {
-        setIsPreviewing(false);
-      }
-    }
-  }
 
-  async function handleOpenPaperHedge() {
-    const capital = parseInput(capitalUsd);
-
-    if (!walletAddress) {
-      setError("Connect a wallet or use the paper wallet before opening a paper hedge.");
-      return;
-    }
-
-    if (!Number.isFinite(capital) || capital <= 0) {
-      setError("Enter capital greater than 0.");
-      return;
-    }
-
-    setIsOpening(true);
-    setError(null);
-
-    try {
-      setOpened(
-        await openHedge({
+      setRouteState("loading");
+      setError(null);
+      const nextRoutes = await fetchHedgeRoutes(
+        {
           walletAddress,
-          capitalUsd: capital,
-          hedgePercent,
+          solAmount: parsedAmount,
+          hedgeRatio,
+          slippageBps,
           leverage,
-          venue
-        })
+          fundingRate: Number.isFinite(fundingRateValue) ? fundingRateValue : 0.04,
+          availableUsdc
+        },
+        controller.signal
       );
-    } catch (openError) {
-      setError(openError instanceof Error ? openError.message : "Unable to open paper hedge.");
+
+      setRoutes(nextRoutes);
+      setLivePrice(nextRoutes.livePrice);
+      setRouteState("ready");
+    }
+
+    void loadRoutes().catch((routeError) => {
+      if (!(routeError instanceof DOMException && routeError.name === "AbortError")) {
+        setRouteState("error");
+        setError(routeError instanceof Error ? routeError.message : "Unable to compare Flash and Phoenix hedge routes.");
+      }
+    });
+
+    return () => controller.abort();
+  }, [
+    amount,
+    availableUsdc,
+    fundingRateValue,
+    hedgeRatio,
+    leverage,
+    parsedAmount,
+    slippageBps,
+    walletAddress
+  ]);
+
+  useEffect(() => {
+    if (!activePrice || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setSimulation(null);
+      return;
+    }
+
+    void simulatePortfolio({
+      capital: parsedAmount * activePrice,
+      hedgePercent: hedgeRatio * 100,
+      stakingYield: 7,
+      fundingRate: Number.isFinite(fundingRateValue) ? fundingRateValue * 100 : 4,
+      days: 90,
+      mode: "historical",
+      seed: "floorfi-best-route"
+    })
+      .then(setSimulation)
+      .catch(() => setSimulation(null));
+  }, [activePrice, fundingRateValue, hedgeRatio, parsedAmount]);
+
+  useEffect(() => {
+    if (!balances) {
+      setPortfolioMetrics(null);
+      return;
+    }
+
+    void calculatePortfolioMetrics({
+      balances: balances.balances,
+      shortPosition: displayedPosition,
+      stakingYieldRate: 0.07,
+      fundingRate: Number.isFinite(fundingRateValue) ? fundingRateValue : 0.04
+    })
+      .then(setPortfolioMetrics)
+      .catch(() => setPortfolioMetrics(null));
+  }, [balances, displayedPosition, fundingRateValue]);
+
+  async function handlePaperExecute(routeId: HedgeRouteId | "best" = "best") {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setError("Enter a SOL exposure amount before paper execution.");
+      return;
+    }
+
+    setExecuteLoading(true);
+    setError(null);
+
+    try {
+      const result = await paperExecuteHedge({
+        routeId,
+        walletAddress,
+        solAmount: parsedAmount,
+        hedgeRatio,
+        slippageBps,
+        leverage,
+        fundingRate: Number.isFinite(fundingRateValue) ? fundingRateValue : 0.04,
+        availableUsdc
+      });
+      setPaperExecution(result);
+      setTrackedPosition(result.position);
+      storePosition(result.position);
+    } catch (executeError) {
+      setError(executeError instanceof Error ? executeError.message : "Unable to paper execute hedge.");
     } finally {
-      setIsOpening(false);
+      setExecuteLoading(false);
     }
   }
 
-  function buildPreviewPayload() {
-    const capital = parseInput(capitalUsd);
-    const staking = parseInput(stakingYield);
-    const funding = parseInput(fundingRate);
-
-    if (!Number.isFinite(capital) || capital <= 0) {
-      setError("Enter capital greater than 0.");
-      return null;
-    }
-
-    if (!Number.isFinite(staking) || !Number.isFinite(funding)) {
-      setError("Enter valid annual staking and funding rates.");
-      return null;
-    }
-
-    return {
-      walletAddress: walletAddress ?? undefined,
-      capitalUsd: capital,
-      hedgePercent,
-      stakingYield: staking / 100,
-      fundingRate: funding / 100,
-      leverage,
-      venue
-    };
-  }
-
-  const mode = preview?.mode ?? "paper";
-  const liveEnabled = mode === "live";
+  const simulatorExpected = simulation?.metrics;
 
   return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white antialiased sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        <nav className="flex items-center justify-between gap-3">
-          <Link
-            to="/"
-            className="text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950"
-          >
-            FloorFi
-          </Link>
-          <div className="flex items-center gap-2">
+    <main className="min-h-screen bg-neutral-100 px-4 py-6 text-neutral-950 antialiased sm:px-6 lg:px-8">
+      <div className="mx-auto min-w-0 max-w-7xl">
+        <nav className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <Link
+              to="/"
+              className="text-sm font-semibold text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2"
+            >
+              FloorFi
+            </Link>
+            <Badge>Paper Mode</Badge>
+            <Badge>Flash + Phoenix Perps</Badge>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Link
               to="/app"
-              className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-semibold text-neutral-300 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950"
+              className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-semibold text-neutral-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2"
             >
               Simulator
             </Link>
-            <button
-              type="button"
-              onClick={() => void connectWallet()}
-              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 text-sm font-semibold text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950"
-            >
-              <Wallet className="h-4 w-4" aria-hidden="true" />
-              {walletLabel}
-            </button>
+            <WalletMultiButton />
           </div>
         </nav>
 
-        <header className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
+        <header className="mt-8 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-end">
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md bg-emerald-400/15 px-2.5 py-1 text-xs font-semibold text-emerald-200">
-                One-Click Hedge
+              <span className="rounded-md bg-neutral-950 px-2.5 py-1 text-xs font-semibold text-white">
+                Best Hedge Routing
               </span>
-              <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${liveEnabled ? "bg-red-400/15 text-red-200" : "bg-amber-300/15 text-amber-100"}`}>
-                {liveEnabled ? "Live Mode" : "Paper Mode"}
-              </span>
+              {recommendedRoute ? (
+                <span className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                  Best route: {recommendedRoute.label}
+                </span>
+              ) : (
+                <span className="rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                  Awaiting route
+                </span>
+              )}
             </div>
-            <h1 className="mt-4 text-4xl font-semibold tracking-normal text-white sm:text-5xl">
-              Preview SOL downside protection.
+            <h1 className="mt-4 max-w-full break-words text-3xl font-semibold tracking-normal text-neutral-950 md:text-4xl">
+              Compare Flash and Phoenix perps before opening a paper SOL hedge.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-6 text-neutral-400">
-              This is a hedge preview, not guaranteed protection. Paper mode uses live market data but does not
-              execute real trades.
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
+              Historical data powered by CoinGecko. Live market data powered by Birdeye. Perp execution comparison
+              powered by Flash + Phoenix.
             </p>
           </div>
-          <div className="rounded-lg border border-white/10 bg-neutral-900 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">SOL balance</p>
-            <p className="mt-1 font-mono text-2xl font-semibold text-white">
-              {solBalance === null ? "Not connected" : `${solBalance.toFixed(4)} SOL`}
-            </p>
-          </div>
+
+          <section className="min-w-0 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Wallet balances</p>
+                <p className="mt-1 text-sm text-neutral-600">
+                  {walletAddress ? truncateAddress(walletAddress) : "Connect to label paper positions"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshBalances()}
+                disabled={!walletAddress}
+                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-neutral-300 bg-white text-neutral-700 transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Refresh balances"
+              >
+                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <BalanceTile balance={solBalance} fallback="SOL" />
+              <BalanceTile balance={usdcBalance} fallback="USDC" />
+              <BalanceTile balance={msolBalance} fallback="mSOL" />
+              <BalanceTile balance={jitoBalance} fallback="JitoSOL" />
+            </div>
+            {balances?.marketDataError ? (
+              <p className="mt-3 text-xs leading-5 text-amber-800">{balances.marketDataError}</p>
+            ) : null}
+          </section>
         </header>
 
         {error ? (
-          <div className="mt-6 rounded-lg border border-red-400/30 bg-red-400/10 p-4 text-red-100" role="alert">
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800" role="alert">
             <div className="flex gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
+              <AlertTriangle className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
               <p className="text-sm">{error}</p>
             </div>
           </div>
         ) : null}
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)]">
-          <div className="rounded-lg border border-white/10 bg-neutral-900 p-5">
-            <h2 className="text-lg font-semibold text-white">Inputs</h2>
+        <section className="mt-6 grid min-w-0 gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm lg:self-start">
+            <h2 className="text-lg font-semibold text-neutral-950">Hedge inputs</h2>
             <div className="mt-5 space-y-5">
-              <DarkInput
-                id="capitalUsd"
-                label="Capital to protect"
-                prefix="$"
-                value={capitalUsd}
-                onChange={setCapitalUsd}
+              <TextInput id="amount" label="SOL exposure" value={amount} suffix="SOL" onChange={setAmount} />
+              <Segmented
+                label={<TooltipLabel label="Hedge ratio" tip="Percentage of SOL exposure to offset with a short perp." />}
+                options={HEDGE_RATIOS.map((ratio) => ({ label: `${Math.round(ratio * 100)}%`, value: ratio }))}
+                value={hedgeRatio}
+                onChange={setHedgeRatio}
               />
               <Segmented
-                label="Hedge level"
-                options={hedgeLevels.map((value) => ({ label: `${Math.round(value * 100)}%`, value }))}
-                value={hedgePercent}
-                onChange={(value) => setHedgePercent(value as (typeof hedgeLevels)[number])}
+                label="Leverage"
+                options={[
+                  { label: "1x", value: 1 as const },
+                  { label: "2x", value: 2 as const },
+                  { label: "3x", value: 3 as const }
+                ]}
+                value={leverage}
+                onChange={setLeverage}
               />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <DarkInput
-                  id="stakingYield"
-                  label="Staking yield"
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                <TextInput
+                  id="slippage"
+                  label="Slippage"
+                  value={String(slippageBps / 100)}
                   suffix="%"
-                  value={stakingYield}
-                  onChange={setStakingYield}
+                  onChange={(next) => setSlippageBps(Math.max(1, Math.round(parseAmount(next) * 100)))}
                 />
-                <DarkInput
+                <TextInput
                   id="fundingRate"
-                  label="Funding rate"
-                  suffix="%"
+                  label={<TooltipLabel label="Flash funding" tip="Fallback annualized funding cost estimate when venue data is unavailable." />}
                   value={fundingRate}
+                  suffix="%"
                   onChange={setFundingRate}
                 />
               </div>
-              <Segmented
-                label="Leverage"
-                options={leverages.map((value) => ({ label: `${value}x`, value }))}
-                value={leverage}
-                onChange={(value) => setLeverage(value as Leverage)}
-              />
-              <Segmented
-                label="Venue"
-                options={[
-                  { label: "Mock", value: "mock" },
-                  { label: "Flash", value: "flash" }
-                ]}
-                value={venue}
-                onChange={(value) => setVenue(value as HedgeVenue)}
-              />
-              <button
-                type="button"
-                onClick={() => void handlePreview()}
-                disabled={isPreviewing}
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-emerald-400 px-4 text-sm font-semibold text-neutral-950 transition hover:bg-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isPreviewing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" aria-hidden="true" />}
-                Preview Hedge
-              </button>
             </div>
-          </div>
+          </aside>
 
-          <div className="rounded-lg border border-white/10 bg-neutral-900 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-white">Hedge Preview</h2>
-                <p className="mt-1 text-sm text-neutral-400">Live SOL market data by Birdeye.</p>
-              </div>
-              <span className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-semibold text-neutral-200">
-                {livePrice ? formatCurrencyPrecise(livePrice.priceUsd) : "Loading SOL"}
-              </span>
-            </div>
+          <div className="min-w-0 space-y-6">
+            <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Metric
+                label="Live SOL"
+                value={activePrice ? formatCurrencyPrecise(activePrice) : routeState === "loading" ? "Loading" : "Unavailable"}
+                detail={`Source ${routes?.sourceBreakdown.liveMarket ?? livePrice?.source ?? "Birdeye"}`}
+              />
+              <Metric
+                label="Best hedge rate"
+                value={recommendedRoute?.estimatedCostBps !== null && recommendedRoute ? `${recommendedRoute.estimatedCostBps.toFixed(1)} bps` : "Unavailable"}
+                detail={recommendedRoute ? `${recommendedRoute.label} score ${recommendedRoute.score?.toFixed(1) ?? "n/a"}` : "Waiting for eligible route"}
+                tone={highRisk ? "risk" : "neutral"}
+              />
+              <Metric
+                label="Phoenix spread"
+                value={phoenixRoute?.spreadBps !== null && phoenixRoute ? `${phoenixRoute.spreadBps.toFixed(1)} bps` : "Unavailable"}
+                detail={phoenixRoute?.availability.status === "available" ? "SOL-PERP orderbook" : phoenixRoute?.availability.reason ?? "Public data pending"}
+                tone={phoenixRoute?.availability.status === "unavailable" ? "risk" : "neutral"}
+              />
+              <Metric
+                label="Paper position"
+                value={displayedPosition ? formatCurrencyPrecise(displayedPosition.notionalUsd) : "None"}
+                detail={displayedPosition ? `${displayedPosition.venue} ${truncateAddress(displayedPosition.id)}` : "No signatures sent"}
+              />
+            </section>
 
-            {preview ? (
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <Metric label="Hedge notional" value={formatCurrencyPrecise(preview.hedgeNotionalUsd)} />
-                <Metric label="SOL short size" value={`${preview.estimatedSolShortSize.toFixed(4)} SOL`} />
-                <Metric label="Margin required" value={formatCurrencyPrecise(preview.marginRequiredUsd)} />
-                <Metric label="Liquidation price" value={formatCurrencyPrecise(preview.estimatedLiquidationPrice)} tone="risk" />
-                <Metric label="Liquidation distance" value={formatPercent(preview.liquidationDistance)} tone={preview.health === "safe" ? "green" : "risk"} />
-                <Metric label="Health" value={preview.health.toUpperCase()} tone={preview.health === "safe" ? "green" : "risk"} />
-                <Metric label="Estimated net APY" value={formatPercent(preview.estimatedNetAPY)} tone={preview.estimatedNetAPY >= 0 ? "green" : "risk"} />
-                <Metric label="Funding cost" value={formatCurrencyPrecise(preview.estimatedAnnualFundingCostUsd)} tone="risk" />
-                <Metric label="Protection level" value={`${Math.round(hedgePercent * 100)}%`} />
-                <Metric label="Protection benefit" value={formatCurrencyPrecise(preview.protectionBenefit)} tone="green" />
-              </div>
-            ) : (
-              <div className="mt-6 flex min-h-[320px] items-center justify-center rounded-md border border-dashed border-white/15 bg-white/[0.03] px-6 text-center text-sm leading-6 text-neutral-400">
-                Choose inputs and preview the hedge before opening a paper position.
-              </div>
-            )}
-          </div>
-        </section>
+            <section className="grid min-w-0 gap-6 xl:grid-cols-2">
+              <VenueCard
+                route={flashRoute}
+                recommended={routes?.recommendedRouteId === "flash_perp_short"}
+                loading={routeState === "loading"}
+                onPaperExecute={() => void handlePaperExecute("flash_perp_short")}
+                disabled={executeLoading}
+              />
+              <VenueCard
+                route={phoenixRoute}
+                recommended={routes?.recommendedRouteId === "phoenix_perp_short"}
+                loading={routeState === "loading"}
+                onPaperExecute={() => void handlePaperExecute("phoenix_perp_short")}
+                disabled={executeLoading}
+              />
+            </section>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
-            <h2 className="text-lg font-semibold text-amber-100">Risk warnings</h2>
-            <ul className="mt-4 grid gap-3 text-sm leading-6 text-amber-50 md:grid-cols-2">
-              {(preview?.warnings ?? [
-                "Funding can flip.",
-                "Liquidation can occur.",
-                "Hedge is not guaranteed protection.",
-                "LST basis risk if LST is used later."
-              ]).map((warning) => (
-                <li key={warning} className="flex gap-2">
-                  <AlertCircle className="mt-1 h-4 w-4 flex-none" aria-hidden="true" />
-                  <span>{warning}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-neutral-900 p-5">
-            <button
-              type="button"
-              onClick={() => void handleOpenPaperHedge()}
-              disabled={!preview || isOpening}
-              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-neutral-950 transition hover:bg-neutral-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isOpening ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
-              Open Paper Hedge
-            </button>
-            <button
-              type="button"
-              disabled
-              className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-md border border-white/15 px-4 text-sm font-semibold text-neutral-500"
-            >
-              Open Live Hedge
-            </button>
-            <p className="mt-3 text-xs leading-5 text-neutral-500">Live Flash execution is disabled for this MVP.</p>
-            {opened ? (
-              <div className="mt-4 rounded-md border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
-                Paper position opened: <span className="font-mono">{opened.positionId.slice(0, 18)}...</span>
+            <section className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-950">Paper execution</h2>
+                  <p className="mt-1 text-sm leading-6 text-neutral-600">
+                    The backend chooses the best eligible route from real venue data where available, then records a
+                    paper short position. No wallet signature or on-chain transaction is requested.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={executeLoading || !recommendedRoute}
+                  onClick={() => void handlePaperExecute("best")}
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-neutral-950 px-4 text-sm font-semibold text-white transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                >
+                  {executeLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                  Paper execute best hedge
+                </button>
               </div>
-            ) : null}
+
+              {paperExecution ? (
+                <div className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                  <div className="flex gap-3">
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
+                    <div>
+                      <p className="font-semibold">{paperExecution.selectedRoute.label} paper hedge opened</p>
+                      <p className="mt-1">
+                        {formatCurrencyPrecise(paperExecution.position.notionalUsd)} notional at{" "}
+                        {formatCurrencyPrecise(paperExecution.position.entryPrice)} entry.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-semibold text-neutral-950">Phoenix SOL-PERP depth</h2>
+                <OrderbookDepth route={phoenixRoute} loading={routeState === "loading"} />
+              </div>
+
+              <div className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-neutral-950">Risk checks</h2>
+                  {highRisk ? (
+                    <ShieldAlert className="h-5 w-5 text-red-700" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="h-5 w-5 text-emerald-700" aria-hidden="true" />
+                  )}
+                </div>
+                <RiskList route={recommendedRoute} />
+              </div>
+            </section>
+
+            <section className="grid min-w-0 gap-6 xl:grid-cols-2">
+              <div className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-semibold text-neutral-950">Portfolio dashboard</h2>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <Metric label="SOL exposure" value={formatCurrencyPrecise(solExposureUsd)} detail={`${formatTokenAmount(parsedAmount || 0, 5)} SOL`} />
+                  <Metric label="Short size" value={formatCurrencyPrecise(portfolioMetrics?.shortPositionSizeUsd ?? displayedPosition?.notionalUsd ?? 0)} detail={displayedPosition ? displayedPosition.venue : "No paper short"} />
+                  <Metric label="Net exposure" value={formatCurrencyPrecise(portfolioMetrics?.netExposureUsd ?? solExposureUsd)} detail="After paper hedge" tone={(portfolioMetrics?.netExposureUsd ?? solExposureUsd) < 0 ? "risk" : "neutral"} />
+                  <Metric label="Unrealized PnL" value={formatSignedCurrency(portfolioMetrics?.unrealizedPnl ?? 0)} detail="Paper short only" tone={(portfolioMetrics?.unrealizedPnl ?? 0) < 0 ? "risk" : "neutral"} />
+                </div>
+              </div>
+
+              <div className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-semibold text-neutral-950">Simulation vs live</h2>
+                <div className="mt-5 grid gap-4">
+                  <ComparisonRow
+                    label="Expected from simulator"
+                    primary={simulatorExpected ? formatCurrencyPrecise(simulatorExpected.finalHedged) : "Loading"}
+                    detail={simulatorExpected ? `90d APY ${formatSignedPercent(simulatorExpected.annualizedApyHedged)}` : "Historical CoinGecko path"}
+                  />
+                  <ComparisonRow
+                    label="Current paper route"
+                    primary={recommendedRoute ? recommendedRoute.label : "No route"}
+                    detail={recommendedRoute ? `Estimated cost ${recommendedRoute.estimatedCostBps?.toFixed(1) ?? "n/a"} bps` : "Waiting for route comparison"}
+                  />
+                  <ComparisonRow
+                    label="Liquidation indicator"
+                    primary={displayedPosition ? formatCurrencyPrecise(displayedPosition.estimatedLiquidationPrice) : recommendedRoute?.estimatedLiquidationPrice ? formatCurrencyPrecise(recommendedRoute.estimatedLiquidationPrice) : "Loading"}
+                    detail={displayedPosition ? `${formatPercent(displayedPosition.liquidationDistance)} from spot` : "Before paper execution"}
+                    tone={(displayedPosition?.liquidationDistance ?? recommendedRoute?.liquidationDistance ?? 1) < 0.15 ? "risk" : "neutral"}
+                  />
+                </div>
+              </div>
+            </section>
           </div>
         </section>
       </div>
@@ -363,39 +500,133 @@ export function HedgePage() {
   );
 }
 
-function DarkInput({
-  id,
-  label,
-  value,
-  prefix,
-  suffix,
-  onChange
+function VenueCard({
+  route,
+  recommended,
+  loading,
+  disabled,
+  onPaperExecute
 }: {
-  id: string;
-  label: string;
-  value: string;
-  prefix?: string;
-  suffix?: string;
-  onChange: (value: string) => void;
+  route: HedgeRouteQuote | null;
+  recommended: boolean;
+  loading: boolean;
+  disabled: boolean;
+  onPaperExecute: () => void;
 }) {
+  if (loading && !route) {
+    return <RouteSkeleton />;
+  }
+
+  if (!route) {
+    return (
+      <article className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+        <p className="text-sm font-semibold text-neutral-950">Route unavailable</p>
+        <p className="mt-2 text-sm text-neutral-600">Enter a valid SOL amount to compare hedge venues.</p>
+      </article>
+    );
+  }
+
+  const unavailable = route.availability.status === "unavailable";
+
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-neutral-200">
-        {label}
-      </label>
-      <div className="relative">
-        {prefix ? <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-neutral-500">{prefix}</span> : null}
-        <input
-          id={id}
-          type="text"
-          inputMode="decimal"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-          className={`min-h-11 w-full rounded-md border border-white/15 bg-neutral-950 px-3 py-2 text-sm text-white shadow-sm transition placeholder:text-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${prefix ? "pl-7" : ""} ${suffix ? "pr-9" : ""}`}
-        />
-        {suffix ? <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-neutral-500">{suffix}</span> : null}
+    <article className={`min-w-0 rounded-lg border bg-white p-5 shadow-sm ${recommended ? "border-emerald-300" : "border-neutral-200"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-neutral-950">{route.label}</h2>
+            {recommended ? (
+              <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+                Best hedge rate
+              </span>
+            ) : null}
+            <span className={`rounded-md px-2 py-1 text-xs font-semibold ${unavailable ? "bg-amber-100 text-amber-900" : "bg-neutral-100 text-neutral-700"}`}>
+              {unavailable ? "Unavailable" : "Available"}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-neutral-600">{route.marketSymbol} paper short</p>
+        </div>
+        {route.eligible ? <CheckCircle2 className="h-5 w-5 text-emerald-700" aria-hidden="true" /> : <AlertTriangle className="h-5 w-5 text-amber-700" aria-hidden="true" />}
+      </div>
+
+      {unavailable ? (
+        <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+          {route.availability.reason}
+        </p>
+      ) : null}
+
+      <div className="mt-5 grid min-w-0 gap-3 sm:grid-cols-2">
+        <MiniMetric label="Entry" value={route.estimatedFillPrice ? formatCurrencyPrecise(route.estimatedFillPrice) : "n/a"} />
+        <MiniMetric label="Cost" value={route.estimatedCostBps !== null ? `${route.estimatedCostBps.toFixed(1)} bps` : "n/a"} />
+        <MiniMetric label="Margin" value={route.marginRequiredUsd !== null ? formatCurrencyPrecise(route.marginRequiredUsd) : "n/a"} />
+        <MiniMetric label="Funding" value={route.fundingRate !== null ? formatSignedPercent(route.fundingRate) : "n/a"} />
+      </div>
+
+      <button
+        type="button"
+        disabled={disabled || !route.eligible || unavailable}
+        onClick={onPaperExecute}
+        className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-md border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Paper execute {route.label}
+      </button>
+    </article>
+  );
+}
+
+function RouteSkeleton() {
+  return (
+    <article className="min-w-0 rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+      <div className="h-5 w-40 rounded-md bg-neutral-200" />
+      <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="h-20 rounded-md bg-neutral-100" />
+        ))}
+      </div>
+      <div className="mt-5 h-11 rounded-md bg-neutral-200" />
+    </article>
+  );
+}
+
+function OrderbookDepth({ route, loading }: { route: HedgeRouteQuote | null; loading: boolean }) {
+  const bids = route?.orderbook?.bids ?? [];
+  const asks = route?.orderbook?.asks ?? [];
+
+  if (loading && !route) {
+    return (
+      <div className="mt-5 grid min-w-0 gap-3 sm:grid-cols-2">
+        <div className="h-44 rounded-md bg-neutral-100" />
+        <div className="h-44 rounded-md bg-neutral-100" />
+      </div>
+    );
+  }
+
+  if (!route || route.availability.status === "unavailable" || (bids.length === 0 && asks.length === 0)) {
+    return (
+      <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+        {route?.availability.reason ?? "Phoenix public orderbook depth is unavailable."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 grid min-w-0 gap-4 sm:grid-cols-2">
+      <BookSide title="Bids" rows={bids} />
+      <BookSide title="Asks" rows={asks} />
+    </div>
+  );
+}
+
+function BookSide({ title, rows }: { title: string; rows: Array<{ price: number; size: number }> }) {
+  return (
+    <div className="min-w-0 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-sm font-semibold text-neutral-900">{title}</p>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 6).map((row, index) => (
+          <div key={`${title}-${row.price}-${index}`} className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-mono tabular-nums text-neutral-950">{formatCurrencyPrecise(row.price)}</span>
+            <span className="font-mono tabular-nums text-neutral-600">{formatTokenAmount(row.size, 3)} SOL</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -407,14 +638,14 @@ function Segmented<TValue extends string | number>({
   value,
   onChange
 }: {
-  label: string;
+  label: ReactNode;
   options: Array<{ label: string; value: TValue }>;
   value: TValue;
   onChange: (value: TValue) => void;
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium text-neutral-200">{label}</legend>
+      <legend className="text-sm font-medium text-neutral-900">{label}</legend>
       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
         {options.map((option) => {
           const selected = option.value === value;
@@ -424,10 +655,10 @@ function Segmented<TValue extends string | number>({
               type="button"
               aria-pressed={selected}
               onClick={() => onChange(option.value)}
-              className={`min-h-10 rounded-md border px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${
+              className={`min-h-10 rounded-md border px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
                 selected
-                  ? "border-emerald-300 bg-emerald-300/15 text-emerald-100"
-                  : "border-white/15 bg-white/5 text-neutral-300 hover:bg-white/10"
+                  ? "border-neutral-950 bg-neutral-950 text-white"
+                  : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100"
               }`}
             >
               {option.label}
@@ -439,29 +670,180 @@ function Segmented<TValue extends string | number>({
   );
 }
 
-function Metric({
+function TextInput({
+  id,
   label,
   value,
-  tone = "neutral"
+  suffix,
+  onChange
 }: {
-  label: string;
+  id: string;
+  label: ReactNode;
   value: string;
-  tone?: "green" | "risk" | "neutral";
+  suffix?: string;
+  onChange: (value: string) => void;
 }) {
-  const toneClass = tone === "green" ? "text-emerald-300" : tone === "risk" ? "text-amber-200" : "text-white";
-
   return (
-    <div className="rounded-lg border border-white/10 bg-neutral-950 p-4">
-      <p className="text-sm text-neutral-500">{label}</p>
-      <p className={`mt-2 font-mono text-xl font-semibold ${toneClass}`}>{value}</p>
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-neutral-900">
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type="text"
+          inputMode="decimal"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className={`min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${suffix ? "pr-16" : ""}`}
+        />
+        {suffix ? <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-neutral-500">{suffix}</span> : null}
+      </div>
     </div>
   );
 }
 
-function parseInput(value: string): number {
+function TooltipLabel({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <Info className="h-3.5 w-3.5 text-neutral-500" aria-label={tip}>
+        <title>{tip}</title>
+      </Info>
+    </span>
+  );
+}
+
+function Badge({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700">
+      {children}
+    </span>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  detail,
+  tone = "neutral"
+}: {
+  label: ReactNode;
+  value: string;
+  detail: string;
+  tone?: "neutral" | "risk";
+}) {
+  return (
+    <div className={`min-w-0 rounded-lg border p-4 ${tone === "risk" ? "border-amber-300 bg-amber-50" : "border-neutral-200 bg-white"}`}>
+      <p className="text-sm font-medium text-neutral-600">{label}</p>
+      <p className={`mt-2 break-words font-mono text-xl font-semibold tabular-nums ${tone === "risk" ? "text-amber-900" : "text-neutral-950"}`}>{value}</p>
+      <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-xs font-semibold text-neutral-500">{label}</p>
+      <p className="mt-1 font-mono text-sm font-semibold text-neutral-950 tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function BalanceTile({ balance, fallback }: { balance?: TokenBalance; fallback: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-xs font-semibold text-neutral-500">{balance?.symbol ?? fallback}</p>
+      <p className="mt-1 font-mono text-sm font-semibold text-neutral-950 tabular-nums">
+        {balance ? formatTokenAmount(balance.balance, balance.symbol === "USDC" ? 2 : 5) : "0"}
+      </p>
+      <p className="mt-1 text-xs text-neutral-600">{balance?.valueUsd === null || !balance ? "No USD mark" : formatCurrencyPrecise(balance.valueUsd)}</p>
+    </div>
+  );
+}
+
+function RiskList({ route }: { route: HedgeRouteQuote | null }) {
+  const items = route?.riskWarnings ?? [];
+
+  if (!route) {
+    return (
+      <div className="mt-4 rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+        Load route comparison to see risk checks.
+      </div>
+    );
+  }
+
+  return (
+    <ul className="mt-4 space-y-3">
+      {items.map((warning, index) => (
+        <li key={`${warning.code}-${index}`} className="flex gap-2 text-sm leading-6 text-neutral-700">
+          <AlertTriangle className={`mt-1 h-4 w-4 flex-none ${warning.severity === "danger" ? "text-red-700" : warning.severity === "warning" ? "text-amber-700" : "text-neutral-500"}`} aria-hidden="true" />
+          <span>{warning.message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ComparisonRow({
+  label,
+  primary,
+  detail,
+  tone = "neutral"
+}: {
+  label: string;
+  primary: string;
+  detail: string;
+  tone?: "neutral" | "risk";
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-4 rounded-md border border-neutral-200 bg-neutral-50 p-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-neutral-700">{label}</p>
+        <p className="mt-1 text-xs text-neutral-600">{detail}</p>
+      </div>
+      <p className={`min-w-0 break-words text-right font-mono text-lg font-semibold tabular-nums ${tone === "risk" ? "text-red-700" : "text-neutral-950"}`}>{primary}</p>
+    </div>
+  );
+}
+
+function findBalance(balances: TokenBalance[] | undefined, symbol: TokenBalance["symbol"]) {
+  return balances?.find((balance) => balance.symbol === symbol);
+}
+
+function parseAmount(value: string): number {
   return Number(value.replace(/,/g, "").trim());
 }
 
-function shortAddress(address: string): string {
+function truncateAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+function refreshPosition(position: VenuePosition, solPrice: number): VenuePosition {
+  const unrealizedPnl = -position.notionalUsd * ((solPrice - position.entryPrice) / position.entryPrice);
+  const liquidationDistance = Math.max((position.estimatedLiquidationPrice - solPrice) / solPrice, 0);
+
+  return {
+    ...position,
+    currentPrice: solPrice,
+    unrealizedPnl,
+    liquidationDistance,
+    health: liquidationDistance > 0.25 ? "safe" : liquidationDistance >= 0.1 ? "warning" : "danger"
+  };
+}
+
+function loadStoredPosition(): VenuePosition | null {
+  try {
+    const raw = window.localStorage.getItem(POSITION_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as VenuePosition) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storePosition(position: VenuePosition) {
+  window.localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(position));
 }

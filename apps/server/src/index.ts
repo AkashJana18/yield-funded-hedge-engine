@@ -5,10 +5,15 @@ import express from "express";
 import { BirdeyeService } from "./integrations/birdeye/birdeye.service.js";
 import { createHedgeRouter } from "./routes/hedge.routes.js";
 import { createMarketRouter } from "./routes/market.routes.js";
+import { createPortfolioRouter } from "./routes/portfolio.routes.js";
 import { createPositionsRouter } from "./routes/positions.routes.js";
+import { createStakingRouter } from "./routes/staking.routes.js";
+import { createSwapRouter } from "./routes/swap.routes.js";
 import { createWalletRouter } from "./routes/wallet.routes.js";
 import { simulationRequestSchema } from "./schemas.js";
+import { CoinGeckoService } from "./services/coingecko.js";
 import { HedgeService } from "./services/hedge.service.js";
+import { LiveMarketService } from "./services/liveMarket.service.js";
 import { generateSimulatedPrices, runSimulation } from "./services/simulation.js";
 
 config({
@@ -19,7 +24,9 @@ config({
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
 const marketData = new BirdeyeService();
-const hedgeService = new HedgeService();
+const historicalData = new CoinGeckoService();
+const liveMarket = new LiveMarketService(marketData, historicalData);
+const hedgeService = new HedgeService(marketData, historicalData, liveMarket);
 
 app.use(cors({ origin: resolveCorsOrigin }));
 app.use(express.json());
@@ -31,8 +38,12 @@ app.get("/", (_request, response) => {
     routes: {
       health: "GET /health",
       simulate: "POST /simulate",
-      marketLive: "GET /api/market/sol/live",
+      marketLive: "GET /api/market/live",
       marketHistory: "GET /api/market/sol/history?days=30",
+      hedgeRoutes: "POST /api/hedge/routes",
+      hedgePaperExecute: "POST /api/hedge/paper/execute",
+      swapQuote: "POST /api/swap/quote",
+      stakingPreview: "POST /api/stake/preview",
       hedgePreview: "POST /api/hedge/preview"
     }
   });
@@ -55,7 +66,7 @@ app.post("/simulate", async (request, response) => {
 
   try {
     const input = parsed.data;
-    const historical = input.mode === "historical" ? await marketData.getSolHistory(input.days) : null;
+    const historical = input.mode === "historical" ? await historicalData.getSolHistory(input.days) : null;
     const prices = historical
       ? historical.prices.map((point) => point.price)
       : generateSimulatedPrices(input.days, input.seed ?? "sol-yield-funded-hedge");
@@ -83,7 +94,7 @@ app.post("/api/simulate", async (request, response) => {
 
   try {
     const input = parsed.data;
-    const historical = input.mode === "historical" ? await marketData.getSolHistory(input.days) : null;
+    const historical = input.mode === "historical" ? await historicalData.getSolHistory(input.days) : null;
     const prices = historical
       ? historical.prices.map((point) => point.price)
       : generateSimulatedPrices(input.days, input.seed ?? "sol-yield-funded-hedge");
@@ -98,10 +109,13 @@ app.post("/api/simulate", async (request, response) => {
   }
 });
 
-app.use("/api/market", createMarketRouter(marketData));
+app.use("/api/market", createMarketRouter(marketData, historicalData, liveMarket));
+app.use("/api/swap", createSwapRouter());
+app.use("/api/stake", createStakingRouter());
 app.use("/api/hedge", createHedgeRouter(hedgeService));
 app.use("/api/positions", createPositionsRouter(hedgeService));
-app.use("/api/wallet", createWalletRouter());
+app.use("/api/portfolio", createPortfolioRouter());
+app.use("/api/wallet", createWalletRouter(marketData, undefined, liveMarket));
 
 app.listen(port, () => {
   console.log(`SOL hedge simulator API listening on http://localhost:${port}`);

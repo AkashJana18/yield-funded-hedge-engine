@@ -110,7 +110,7 @@ export function SimulatorPage() {
                   <p className="mt-1 text-sm">{apiError}</p>
                   {formState.mode === "historical" ? (
                     <p className="mt-1 text-sm">
-                      Historical mode prefers Birdeye and falls back to CoinGecko if Birdeye is unavailable.
+                      Historical mode uses CoinGecko replay data. Retry in a moment if the public API is unavailable.
                     </p>
                   ) : null}
                 </div>
@@ -137,7 +137,7 @@ export function SimulatorPage() {
                 </div>
               </div>
               <span className="inline-flex w-fit rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                Data source: {result?.source === "coingecko" ? "CoinGecko fallback" : result?.source === "simulated" ? "Simulated" : "Birdeye"}
+                Data source: {result?.source === "simulated" ? "Simulated" : "CoinGecko"}
               </span>
             </div>
           </section>

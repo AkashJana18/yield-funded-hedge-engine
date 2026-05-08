@@ -1,24 +1,24 @@
-export const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
+import type { SupportedTokenSymbol } from "../../constants.js";
 
-export type MarketDataSource = "birdeye" | "coingecko";
+export type MarketDataSource = "birdeye";
 
-export interface SolLivePrice {
-  symbol: "SOL";
+export interface TokenLivePrice {
+  symbol: SupportedTokenSymbol;
+  mint: string;
   priceUsd: number;
   source: MarketDataSource;
   timestamp: string;
 }
 
-export interface NormalizedPricePoint {
-  timestamp: number;
-  price: number;
-}
+export type SolLivePrice = TokenLivePrice & { symbol: "SOL" };
 
-export interface SolHistoryResponse {
+export interface TokenMetadata {
+  symbol: SupportedTokenSymbol;
+  mint: string;
+  name: string;
+  decimals: number;
+  logoURI?: string;
   source: MarketDataSource;
-  symbol: "SOL";
-  days: 30 | 90 | 365;
-  prices: NormalizedPricePoint[];
 }
 
 export interface BirdeyePriceResponse {
@@ -31,16 +31,42 @@ export interface BirdeyePriceResponse {
   };
 }
 
-export interface BirdeyeHistoryResponse {
+export interface BirdeyeMultiPriceResponse {
   success?: boolean;
-  data?: {
-    items?: Array<{
-      unixTime?: number;
-      time?: number;
-      value?: number;
-      price?: number;
-      close?: number;
-      c?: number;
-    }>;
-  };
+  data?: Record<
+    string,
+    | {
+        value?: number;
+        price?: number;
+        updateUnixTime?: number;
+        updateTime?: number;
+      }
+    | null
+  >;
+}
+
+export interface BirdeyeMetadataResponse {
+  success?: boolean;
+  data?:
+    | Array<{
+        address?: string;
+        mint?: string;
+        name?: string;
+        symbol?: string;
+        decimals?: number;
+        logoURI?: string;
+        logo_uri?: string;
+      }>
+    | Record<
+        string,
+        {
+          address?: string;
+          mint?: string;
+          name?: string;
+          symbol?: string;
+          decimals?: number;
+          logoURI?: string;
+          logo_uri?: string;
+        }
+      >;
 }

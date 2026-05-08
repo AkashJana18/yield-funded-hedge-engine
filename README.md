@@ -1,20 +1,24 @@
 # FloorFi
 
-FloorFi is a Solana DeFi simulation and hedge-preview app for comparing unhedged SOL exposure against a yield-funded hedged strategy using spot/LST exposure plus short SOL perp protection.
+FloorFi is a Solana paper execution and risk engine for yield-funded SOL hedging. It compares Flash Perps and Phoenix Perps short routes, replays historical SOL paths with CoinGecko, and keeps real transaction submission disabled for this hackathon build.
 
 ## Stack
 
 - Frontend: Vite, React, TypeScript, Tailwind CSS, Recharts
+- Wallets: Solana wallet-adapter with mainnet auto-connect
 - Backend: Node.js, Express, TypeScript
-- Market data: Birdeye first, CoinGecko historical fallback
-- Solana: `@solana/web3.js`
-- Execution adapter: Flash Trade adapter is present, with live execution disabled by default
+- Historical data: CoinGecko `/coins/solana/market_chart`
+- Live SOL market data: cached Birdeye, with CoinGecko fallback
+- Swap route: Jupiter Swap API through the backend
+- Staking: Marinade mSOL transaction builder, JitoSOL preview adapter
+- Hedge venues: Flash Perps paper preview plus Phoenix SOL-PERP public market/orderbook/funding/risk adapter through `@ellipsis-labs/rise`
 
 ## App Routes
 
 - `/` - landing page
-- `/app` - existing simulator dashboard
-- `/hedge` - one-click hedge preview flow
+- `/app` - simulator dashboard
+- `/build` - Flash + Phoenix best hedge route dashboard
+- `/hedge` - alias for `/build`
 
 ## Setup
 
@@ -24,12 +28,21 @@ Create `.env` from `.env.example`:
 BIRDEYE_API_KEY=your-birdeye-api-key
 BIRDEYE_BASE_URL=https://public-api.birdeye.so
 BIRDEYE_CHAIN=solana
+COINGECKO_BASE_URL=https://api.coingecko.com/api/v3
+PHOENIX_API_URL=https://perp-api.phoenix.trade
+PHOENIX_PERP_SYMBOL=SOL
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+VITE_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+JUPITER_BASE_URL=https://lite-api.jup.ag/swap/v1
+SIMULATION_MODE=true
+MAINNET_LIVE=false
 FLASH_ENABLE_LIVE_EXECUTION=false
 DEFAULT_EXECUTION_MODE=paper
+MARINADE_STAKING_APY=0.07
+JITO_STAKING_APY=0.072
 ```
 
-Get a Birdeye API key from the Birdeye developer portal. The backend sends `X-API-KEY` and `x-chain: solana` headers on market requests.
+The Birdeye key stays on the backend. The frontend never receives it.
 
 ```bash
 npm install
@@ -37,112 +50,131 @@ npm run dev
 ```
 
 The frontend runs at `http://localhost:5173` and the backend runs at `http://localhost:4000`.
-`npm run dev` stops stale FloorFi dev processes on ports `4000` and `5173-5176` before starting, so rerunning the command after an interrupted session should not hit `EADDRINUSE`.
-If your browser resolves `localhost` oddly, use `http://127.0.0.1:5173`.
-The frontend defaults to calling the backend on the same hostname and port `4000`, so LAN URLs such as `http://192.168.x.x:5173` call `http://192.168.x.x:4000`.
 
-To point the frontend at a different API URL:
+## Execution Model
 
-```bash
-VITE_API_URL=http://localhost:4000 npm run dev:web
-```
+- Paper mode only for hedging in this pass.
+- No wallet signature or submitted transaction is required for `/api/hedge/paper/execute`.
+- No private key handling.
+- CoinGecko is the only source for 30d, 90d, and 365d replay, simulation, drawdown, and APY comparisons.
+- Birdeye is only used for cached live SOL price and live market display.
+- Phoenix public SOL-PERP data is used where available. If public access is gated or unavailable, the adapter returns typed unavailable status instead of simulated liquidity.
+- Flash and Phoenix routes are scored for paper short previews. Real hedge execution is intentionally disabled.
 
-To run them separately:
-
-```bash
-npm run dev:server
-npm run dev:web
-```
-
-## Build
-
-```bash
-npm run build
-npm start
-```
+The dashboard copy is explicit: historical data powered by CoinGecko, live market data powered by Birdeye, and perp execution comparison powered by Flash + Phoenix.
 
 ## API
 
 ### Market
 
-`GET /api/market/sol/live`
+`GET /api/market/live`
 
-Returns the current SOL price. Birdeye is preferred; if Birdeye live price is rate-limited, the service falls back to the latest normalized historical point.
-
-`GET /api/market/sol/history?days=30|90|365`
-
-Returns normalized daily SOL prices from Birdeye, with CoinGecko as fallback.
-
-### Simulator
-
-`POST /api/simulate`
+Returns current SOL price from cached Birdeye with CoinGecko fallback.
 
 ```json
 {
-  "capital": 10000,
-  "hedgePercent": 50,
-  "stakingYield": 7,
-  "fundingRate": 4,
-  "days": 90,
-  "mode": "simulated",
-  "seed": "optional-seed"
+  "symbol": "SOL",
+  "priceUsd": 89.47,
+  "source": "birdeye",
+  "timestamp": "2026-05-08T15:58:06.000Z"
 }
 ```
 
-`seed` is optional and only affects simulated mode. Passing the same seed returns the same simulated price path.
+`GET /api/market/sol/live`
 
-### Hedge Preview
+Alias for `/api/market/live`.
 
-`POST /api/hedge/preview`
+`GET /api/market/sol/history?days=30|90|365`
+
+Returns normalized daily SOL prices from CoinGecko.
+
+`GET /api/market/tokens/prices?symbols=SOL`
+
+Returns live SOL price from Birdeye. Multi-token live prices are intentionally not part of the hedge-routing data path.
+
+### Swap
+
+`POST /api/swap/quote`
+
+```json
+{
+  "inputSymbol": "USDC",
+  "outputSymbol": "SOL",
+  "amount": 1000,
+  "slippageBps": 50
+}
+```
+
+`POST /api/swap/transaction`
+
+Builds an unsigned Jupiter swap transaction for the connected wallet.
+
+### Stake
+
+`POST /api/stake/preview`
+
+Returns expected mSOL/JitoSOL received, APY, and staking risks.
+
+`POST /api/stake/transaction`
+
+Builds an unsigned Marinade SOL -> mSOL transaction.
+
+### Hedge
+
+`POST /api/hedge/routes`
+
+Compares Flash Perps and Phoenix Perps paper short routes.
 
 ```json
 {
   "walletAddress": "optional",
-  "capitalUsd": 10000,
-  "hedgePercent": 0.5,
-  "stakingYield": 0.07,
-  "fundingRate": 0.04,
-  "leverage": 1,
-  "venue": "mock"
+  "solAmount": 10,
+  "hedgeRatio": 0.5,
+  "slippageBps": 50,
+  "leverage": 2,
+  "availableUsdc": 1000
 }
 ```
 
-Returns hedge notional, estimated SOL short size, margin, liquidation price, liquidation distance, health, net APY, funding cost, and warnings.
+Returns `recommendedRouteId`, `livePrice`, `routes`, and `sourceBreakdown`. Phoenix uses real public SOL-PERP data when available and returns unavailable status when data is gated, missing, or insufficient.
 
-### Paper Positions
+`POST /api/hedge/paper/execute`
 
-`POST /api/hedge/open`
+Creates a paper short only. `routeId` may be `"best"`, `"flash_perp_short"`, or `"phoenix_perp_short"`.
 
 ```json
 {
-  "walletAddress": "PaperMode111111111111111111111111111111111",
-  "capitalUsd": 10000,
-  "hedgePercent": 0.5,
-  "leverage": 1,
-  "venue": "mock"
+  "routeId": "best",
+  "solAmount": 10,
+  "hedgeRatio": 0.5,
+  "slippageBps": 50,
+  "leverage": 2
 }
 ```
 
-`GET /api/positions/:id`
+`POST /api/hedge/preview`
 
-`POST /api/positions/:id/close`
+Legacy preview route. It now delegates to the Flash/Phoenix route comparison and returns paper-mode estimates.
 
-## Paper Mode
+`POST /api/hedge/flash/transaction`
 
-Paper mode uses live market data but never executes real trades. `MockVenue` opens and closes in-memory paper short positions and tracks entry price, current price, notional, margin, liquidation price, unrealized PnL, and health.
+Disabled in this build. Use `/api/hedge/paper/execute`.
 
-## Flash Integration Status
+### Portfolio
 
-`FlashTradeVenue` exists as a clean adapter implementing the same perp venue interface as `MockVenue`. It initializes a Solana connection and can dynamically load `flash-sdk` if the package is installed, but live methods intentionally throw:
+`POST /api/portfolio/metrics`
 
-```text
-Flash live execution is disabled or not implemented yet
-```
+Calculates LST value, short size, net delta, hedge ratio, unrealized PnL, estimated staking yield, funding cost, net APY, and liquidation warning state.
 
-Live Flash execution is disabled unless:
+## Safety
 
-```bash
-FLASH_ENABLE_LIVE_EXECUTION=true
-```
+The builder warns when:
 
-Do not enable live execution until the exact Flash SDK order methods, wallet signing path, slippage controls, and risk limits are reviewed. This MVP does not include custody, auth, a database, Anchor programs, or real vault logic.
+- Hedge ratio is above 75%
+- USDC margin is insufficient
+- Liquidation price is too close
+- Funding rate is above staking yield
+- JitoSOL is selected in preview-only mode
+- Phoenix public data is gated, unavailable, or insufficient for the requested size
+
+The primary action is paper execution only: no wallet signature is requested and no hedge transaction is sent.

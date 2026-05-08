@@ -20,6 +20,33 @@ body {
   min-width: 320px;
 }
 
+.wallet-adapter-button {
+  min-height: 2.5rem;
+  border-radius: 0.375rem !important;
+  background: rgb(23 23 23) !important;
+  padding: 0 1rem !important;
+  font-family: inherit !important;
+  font-size: 0.875rem !important;
+  font-weight: 700 !important;
+  line-height: 1.25rem !important;
+}
+
+.wallet-adapter-button:not([disabled]):hover {
+  background: rgb(38 38 38) !important;
+}
+
+.wallet-adapter-dropdown-list {
+  border: 1px solid rgb(229 229 229) !important;
+  border-radius: 0.5rem !important;
+  background: white !important;
+  box-shadow: 0 10px 20px rgb(0 0 0 / 0.08) !important;
+}
+
+.wallet-adapter-dropdown-list-item {
+  color: rgb(23 23 23) !important;
+  font-family: inherit !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

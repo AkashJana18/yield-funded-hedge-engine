@@ -16,7 +16,7 @@ import {
   calculateMarginRequired,
   calculateShortPnl,
   estimateShortLiquidationPrice
-} from "../services/risk.service.js";
+} from "../services/riskEngine.js";
 
 export class MockVenue implements PerpVenue {
   readonly name: VenueName = "mock";

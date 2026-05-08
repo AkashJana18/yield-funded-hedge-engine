@@ -37,20 +37,115 @@ export interface SimulationResponse {
   unhedged: number[];
   hedged: number[];
   metrics: SimulationMetrics;
-  source?: "simulated" | "birdeye" | "coingecko";
+  source?: "simulated" | "coingecko";
 }
 
 export type FormErrors = Partial<Record<keyof SimulationFormState, string>>;
 
 export interface SolLivePrice {
   symbol: "SOL";
+  mint?: string;
   priceUsd: number;
   source: "birdeye" | "coingecko";
   timestamp: string;
 }
 
 export type HedgeHealth = "safe" | "warning" | "danger";
-export type HedgeVenue = "mock" | "flash";
+export type HedgeVenue = "flash";
+export type HedgeRouteId = "flash_perp_short" | "phoenix_perp_short";
+export type PaperHedgeRouteId = HedgeRouteId | "best";
+export type SupportedTokenSymbol = "SOL" | "USDC" | "mSOL" | "JitoSOL";
+export type StartingAsset = "SOL" | "USDC";
+export type StakeAsset = "mSOL" | "JitoSOL";
+
+export interface TokenBalance {
+  symbol: SupportedTokenSymbol;
+  mint: string;
+  balance: number;
+  decimals: number;
+  priceUsd: number | null;
+  valueUsd: number | null;
+}
+
+export interface WalletBalanceResponse {
+  walletAddress: string;
+  solBalance: number;
+  balances: TokenBalance[];
+  marketDataSource: "birdeye" | "coingecko" | null;
+  marketDataError?: string | null;
+}
+
+export interface TokenLivePrice {
+  symbol: SupportedTokenSymbol;
+  mint: string;
+  priceUsd: number;
+  source: "birdeye" | "coingecko";
+  timestamp: string;
+}
+
+export interface TokenPricesResponse {
+  source: "birdeye" | "coingecko";
+  prices: TokenLivePrice[];
+}
+
+export interface SwapRouteLeg {
+  label: string;
+  percent: number;
+  feeAmount: number;
+  feeSymbol: SupportedTokenSymbol | string;
+}
+
+export interface SwapQuoteSummary {
+  inputSymbol: SupportedTokenSymbol;
+  outputSymbol: SupportedTokenSymbol;
+  inputAmount: number;
+  expectedOutputAmount: number;
+  minimumOutputAmount: number;
+  slippageBps: number;
+  priceImpactPct: number;
+  route: SwapRouteLeg[];
+  rawQuote: unknown;
+}
+
+export interface SwapTransactionResponse {
+  swapTransaction: string;
+  lastValidBlockHeight?: number;
+  prioritizationFeeLamports?: number;
+  computeUnitLimit?: number;
+  simulationError?: unknown;
+}
+
+export interface StakePreview {
+  stakeAsset: StakeAsset;
+  inputSol: number;
+  expectedLst: number;
+  solPriceUsd: number;
+  lstPriceUsd: number;
+  stakingApy: number;
+  provider: "Marinade" | "Jito";
+  source: "birdeye";
+  risks: string[];
+}
+
+export interface StakeTransactionResponse {
+  stakeAsset: StakeAsset;
+  serializedTransaction: string;
+  associatedTokenAccount: string;
+  lastValidBlockHeight: number;
+}
+
+export interface RiskWarning {
+  code:
+    | "HIGH_HEDGE_RATIO"
+    | "INSUFFICIENT_MARGIN"
+    | "LIQUIDATION_TOO_CLOSE"
+    | "FUNDING_OVER_YIELD"
+    | "PAPER_MODE"
+    | "FLASH_DISABLED"
+    | "GENERAL_RISK";
+  severity: "info" | "warning" | "danger";
+  message: string;
+}
 
 export interface HedgePreviewRequest {
   walletAddress?: string;
@@ -60,6 +155,7 @@ export interface HedgePreviewRequest {
   fundingRate: number;
   leverage: 1 | 2 | 3;
   venue: HedgeVenue;
+  availableUsdc?: number;
 }
 
 export interface HedgePreviewResponse {
@@ -77,6 +173,85 @@ export interface HedgePreviewResponse {
   estimatedAnnualFundingCostUsd: number;
   protectionBenefit: number;
   warnings: string[];
+  riskWarnings: RiskWarning[];
+  highRisk: boolean;
+  recommendedRouteId?: HedgeRouteId | null;
+  routeComparison?: HedgeRoutesResponse;
+}
+
+export interface HedgeRoutesRequest {
+  walletAddress?: string;
+  solAmount: number;
+  hedgeRatio: number;
+  slippageBps: number;
+  leverage?: 1 | 2 | 3;
+  fundingRate?: number;
+  availableUsdc?: number;
+}
+
+export interface HedgeRouteQuote {
+  id: HedgeRouteId;
+  venue: "flash" | "phoenix";
+  label: "Flash Perps" | "Phoenix Perps";
+  instrument: "perp";
+  side: "short";
+  availability: {
+    status: "available" | "unavailable";
+    reason?: string;
+  };
+  eligible: boolean;
+  eligibilityReason?: string;
+  score: number | null;
+  mode: "paper";
+  symbol: "SOL";
+  marketSymbol: "SOL-PERP";
+  hedgeNotionalUsd: number;
+  estimatedSolShortSize: number;
+  estimatedFillPrice: number | null;
+  referencePrice: number;
+  marginRequiredUsd: number | null;
+  estimatedLiquidationPrice: number | null;
+  liquidationDistance: number | null;
+  fundingRate: number | null;
+  estimatedAnnualFundingCostUsd: number | null;
+  spreadBps: number | null;
+  priceImpactBps: number | null;
+  estimatedCostBps: number | null;
+  takerFeeBps: number | null;
+  warnings: string[];
+  riskWarnings: RiskWarning[];
+  orderbook?: {
+    bids: Array<{ price: number; size: number }>;
+    asks: Array<{ price: number; size: number }>;
+  };
+}
+
+export interface HedgeRoutesResponse {
+  recommendedRouteId: HedgeRouteId | null;
+  livePrice: {
+    symbol: "SOL";
+    priceUsd: number;
+    source: "birdeye" | "coingecko";
+    timestamp: string;
+  };
+  routes: HedgeRouteQuote[];
+  sourceBreakdown: {
+    historical: "coingecko";
+    liveMarket: "birdeye" | "coingecko";
+    flash: "flash-sdk-estimate";
+    phoenix: "available" | "unavailable";
+  };
+}
+
+export interface PaperExecuteHedgeRequest extends HedgeRoutesRequest {
+  routeId: PaperHedgeRouteId;
+}
+
+export interface PaperExecuteHedgeResponse {
+  executionMode: "paper";
+  selectedRoute: HedgeRouteQuote;
+  position: VenuePosition;
+  alternatives: HedgeRouteQuote[];
 }
 
 export interface OpenHedgeRequest {
@@ -116,7 +291,21 @@ export interface OpenHedgeResponse {
   position: VenuePosition;
 }
 
-export interface WalletBalanceResponse {
-  walletAddress: string;
-  solBalance: number;
+export interface FlashHedgeTransactionResponse {
+  serializedTransaction: string;
+  lastValidBlockHeight: number;
+  position: VenuePosition;
+}
+
+export interface PortfolioMetrics {
+  lstBalance: number;
+  lstValueUsd: number;
+  shortPositionSizeUsd: number;
+  netExposureUsd: number;
+  hedgeRatio: number;
+  unrealizedPnl: number;
+  estimatedStakingYieldUsd: number;
+  estimatedFundingCostUsd: number;
+  netApy: number;
+  liquidationWarning: "none" | "watch" | "high";
 }

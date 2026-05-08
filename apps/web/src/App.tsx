@@ -9,6 +9,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/app" element={<SimulatorPage />} />
       <Route path="/hedge" element={<HedgePage />} />
+      <Route path="/build" element={<HedgePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
