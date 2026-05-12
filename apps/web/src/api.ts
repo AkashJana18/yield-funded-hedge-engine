@@ -61,11 +61,11 @@ export async function fetchHedgeRoutes(
   return postJson<HedgeRoutesResponse>("/api/hedge/routes", payload, signal);
 }
 
-export async function paperExecuteHedge(
+export async function openProtectionPosition(
   payload: PaperExecuteHedgeRequest,
   signal?: AbortSignal
 ): Promise<PaperExecuteHedgeResponse> {
-  return postJson<PaperExecuteHedgeResponse>("/api/hedge/paper/execute", payload, signal);
+  return postJson<PaperExecuteHedgeResponse>("/api/hedge/open-protection", payload, signal);
 }
 
 export async function buildFlashHedgeTransaction(
@@ -165,7 +165,7 @@ async function parseJsonResponse<TResponse>(response: Response): Promise<TRespon
     | null;
 
   if (!response.ok) {
-    throw new Error(isErrorResponse(data) ? data.error : "Simulation request failed.");
+    throw new Error(isErrorResponse(data) ? data.error : "Request failed.");
   }
 
   return data as TResponse;

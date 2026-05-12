@@ -277,7 +277,7 @@ export class HedgeService {
       ?? null;
 
     if (!selectedRoute) {
-      throw new Error("No eligible hedge route is available for paper execution.");
+      throw new Error("No eligible protection route is available.");
     }
 
     if (!selectedRoute.eligible || selectedRoute.availability.status !== "available") {
@@ -366,7 +366,7 @@ export class HedgeService {
   async buildFlashOpenTransaction(
     _input: BuildFlashHedgeTransactionInput
   ): Promise<BuildFlashHedgeTransactionResponse> {
-    throw new Error("Live hedge transaction building is disabled. Use POST /api/hedge/paper/execute.");
+    throw new Error("Protection route is temporarily unavailable.");
   }
 
   private getVenue(venueName: VenueName): PerpVenue {

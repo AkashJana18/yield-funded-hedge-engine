@@ -37,7 +37,7 @@ export async function executeJupiterSwap(input: {
   });
 
   if (transaction.simulationError) {
-    throw new Error(`Jupiter simulation failed: ${JSON.stringify(transaction.simulationError)}`);
+    throw new Error(`Route validation failed: ${JSON.stringify(transaction.simulationError)}`);
   }
 
   return executeSerializedVersionedTransaction(input.connection, input.wallet, transaction.swapTransaction);

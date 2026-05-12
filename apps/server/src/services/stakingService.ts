@@ -56,7 +56,7 @@ export class StakingService {
     solAmount: number;
   }): Promise<StakeTransactionResponse> {
     if (input.stakeAsset !== "mSOL") {
-      throw new Error("JitoSOL staking adapter is preview-only in this build. Use mSOL for live staking.");
+      throw new Error("JitoSOL staking is not available right now. Use mSOL to continue.");
     }
 
     const publicKey = new PublicKey(input.walletAddress);

@@ -40,7 +40,7 @@ export const jitoStakingAdapter: StakingAdapter = {
     return previewStake({ stakeAsset: "JitoSOL", solAmount }, signal);
   },
   async stake() {
-    throw new Error("JitoSOL staking adapter is present but disabled in this build. Select mSOL for live staking.");
+    throw new Error("JitoSOL staking is not available right now. Select mSOL to continue.");
   }
 };
 

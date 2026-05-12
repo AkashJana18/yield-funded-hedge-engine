@@ -254,6 +254,8 @@ export interface PaperExecuteHedgeResponse {
   alternatives: HedgeRouteQuote[];
 }
 
+export type ProtectionExecutionResponse = PaperExecuteHedgeResponse;
+
 export interface OpenHedgeRequest {
   walletAddress: string;
   capitalUsd: number;

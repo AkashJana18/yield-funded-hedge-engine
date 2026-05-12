@@ -33,15 +33,15 @@ app.use(express.json());
 
 app.get("/", (_request, response) => {
   response.json({
-    name: "SOL yield-funded hedging simulator API",
+    name: "FloorFi SOL protection API",
     status: "ok",
     routes: {
       health: "GET /health",
-      simulate: "POST /simulate",
+      replay: "POST /simulate",
       marketLive: "GET /api/market/live",
       marketHistory: "GET /api/market/sol/history?days=30",
       hedgeRoutes: "POST /api/hedge/routes",
-      hedgePaperExecute: "POST /api/hedge/paper/execute",
+      openProtection: "POST /api/hedge/open-protection",
       swapQuote: "POST /api/swap/quote",
       stakingPreview: "POST /api/stake/preview",
       hedgePreview: "POST /api/hedge/preview"
@@ -58,7 +58,7 @@ app.post("/simulate", async (request, response) => {
 
   if (!parsed.success) {
     response.status(400).json({
-      error: "Invalid simulation input.",
+      error: "Invalid market replay input.",
       details: parsed.error.flatten().fieldErrors
     });
     return;
@@ -76,7 +76,7 @@ app.post("/simulate", async (request, response) => {
       source: historical?.source ?? "simulated"
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Simulation failed.";
+    const message = error instanceof Error ? error.message : "Market replay failed.";
     response.status(502).json({ error: message });
   }
 });
@@ -86,7 +86,7 @@ app.post("/api/simulate", async (request, response) => {
 
   if (!parsed.success) {
     response.status(400).json({
-      error: "Invalid simulation input.",
+      error: "Invalid market replay input.",
       details: parsed.error.flatten().fieldErrors
     });
     return;
@@ -104,7 +104,7 @@ app.post("/api/simulate", async (request, response) => {
       source: historical?.source ?? "simulated"
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Simulation failed.";
+    const message = error instanceof Error ? error.message : "Market replay failed.";
     response.status(502).json({ error: message });
   }
 });
@@ -118,7 +118,7 @@ app.use("/api/portfolio", createPortfolioRouter());
 app.use("/api/wallet", createWalletRouter(marketData, undefined, liveMarket));
 
 app.listen(port, () => {
-  console.log(`SOL hedge simulator API listening on http://localhost:${port}`);
+  console.log(`FloorFi SOL protection API listening on http://localhost:${port}`);
 });
 
 function resolveCorsOrigin(

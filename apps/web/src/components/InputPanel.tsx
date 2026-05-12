@@ -1,5 +1,5 @@
 import { Play, RefreshCcw } from "lucide-react";
-import type { FormErrors, SimulationDays, SimulationFormState, SimulationMode } from "../types";
+import type { FormErrors, SimulationDays, SimulationFormState } from "../types";
 
 interface InputPanelProps {
   values: SimulationFormState;
@@ -17,11 +17,6 @@ const periods: Array<{ label: string; value: SimulationDays }> = [
   { label: "365 days", value: 365 }
 ];
 
-const modes: Array<{ label: string; value: SimulationMode }> = [
-  { label: "Simulated", value: "simulated" },
-  { label: "Historical", value: "historical" }
-];
-
 export function InputPanel({
   values,
   errors,
@@ -37,7 +32,7 @@ export function InputPanel({
 
   return (
     <form
-      className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm"
+      className="glass-panel rounded-lg p-5"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
@@ -45,21 +40,21 @@ export function InputPanel({
       aria-busy={isLoading}
     >
       <div className="space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Strategy inputs</p>
-        <h1 className="text-2xl font-semibold tracking-normal text-neutral-950">SOL hedge simulator</h1>
-        <p className="text-sm leading-6 text-neutral-600">
-          Compare spot SOL exposure against a spot plus short perp hedge funded by yield.
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Protection inputs</p>
+        <h1 className="text-2xl font-semibold tracking-normal text-emerald-50">SOL Protection Replay</h1>
+        <p className="text-sm leading-6 text-emerald-50/62">
+          Compare holding SOL alone against a protected position designed to reduce downside during sharp selloffs.
         </p>
       </div>
 
       <div className="mt-6 space-y-5">
         <TextInput
           id="capital"
-          label="Capital"
+          label="Portfolio value"
           prefix="$"
           value={values.capital}
           error={errors.capital}
-          helperText="Initial notional used for spot and hedge PnL."
+          helperText="Value of SOL holdings to protect."
           inputMode="decimal"
           autoComplete="off"
           onChange={(value) => updateValue("capital", value)}
@@ -67,10 +62,10 @@ export function InputPanel({
 
         <div className="space-y-2">
           <div className="flex items-baseline justify-between gap-3">
-            <label htmlFor="hedgePercent" className="text-sm font-medium text-neutral-900">
-              Hedge percentage
+            <label htmlFor="hedgePercent" className="text-sm font-medium text-emerald-50">
+              Protection level
             </label>
-            <span className="font-mono text-sm text-neutral-700">{values.hedgePercent}%</span>
+            <span className="font-mono text-sm text-emerald-200">{values.hedgePercent}%</span>
           </div>
           <input
             id="hedgePercent"
@@ -80,36 +75,36 @@ export function InputPanel({
             step="1"
             value={values.hedgePercent}
             onChange={(event) => updateValue("hedgePercent", Number(event.target.value))}
-            className="h-10 w-full accent-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+            className="h-10 w-full accent-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           />
           {errors.hedgePercent ? (
-            <p id="hedgePercent-error" className="text-xs text-red-700">
+            <p id="hedgePercent-error" className="text-xs text-red-300">
               {errors.hedgePercent}
             </p>
           ) : (
-            <p className="text-xs text-neutral-600">0% keeps full SOL beta. 100% offsets spot price movement.</p>
+            <p className="text-xs text-emerald-50/54">0% keeps full SOL exposure. 100% targets full downside offset.</p>
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
           <TextInput
             id="stakingYield"
-            label="Staking yield"
+            label="Holding yield"
             suffix="%"
             value={values.stakingYield}
             error={errors.stakingYield}
-            helperText="Annualized yield accrued daily on capital."
+            helperText="Annual yield applied to long-term SOL holdings."
             inputMode="decimal"
             autoComplete="off"
             onChange={(value) => updateValue("stakingYield", value)}
           />
           <TextInput
             id="fundingRate"
-            label="Funding rate"
+            label="Protection cost"
             suffix="%"
             value={values.fundingRate}
             error={errors.fundingRate}
-            helperText="Annualized funding cost on hedged notional."
+            helperText="Annual cost assumption used in projections."
             inputMode="decimal"
             autoComplete="off"
             onChange={(value) => updateValue("fundingRate", value)}
@@ -123,31 +118,31 @@ export function InputPanel({
           onChange={(value) => updateValue("days", value)}
         />
 
-        <SegmentedControl
-          legend="Mode"
-          options={modes}
-          value={values.mode}
-          onChange={(value) => updateValue("mode", value)}
-        />
+        <div className="rounded-md border border-emerald-300/16 bg-emerald-300/8 p-3">
+          <p className="text-sm font-medium text-emerald-50">Historical Crash Replay</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-50/56">
+            Uses historical SOL market paths to compare protected and unprotected outcomes.
+          </p>
+        </div>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
         <button
           type="submit"
           disabled={isLoading}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          className="glow-button inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Play className="h-4 w-4" aria-hidden="true" />
-          {isLoading ? "Running" : "Simulate"}
+          {isLoading ? "Running" : "Run Replay"}
         </button>
         <button
           type="button"
           disabled={isLoading || !hasResult}
           onClick={onRunAgain}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="dark-button inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-50"
         >
           <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-          Run Again
+          Refresh Path
         </button>
       </div>
     </form>
@@ -183,12 +178,12 @@ function TextInput({
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-neutral-900">
+      <label htmlFor={id} className="text-sm font-medium text-emerald-50">
         {label}
       </label>
       <div className="relative">
         {prefix ? (
-          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-neutral-500">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-emerald-50/52">
             {prefix}
           </span>
         ) : null}
@@ -202,22 +197,22 @@ function TextInput({
           aria-invalid={error ? "true" : undefined}
           aria-describedby={describedBy}
           onChange={(event) => onChange(event.target.value)}
-          className={`min-h-11 w-full rounded-md border bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm transition placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
+          className={`min-h-11 w-full rounded-md border bg-black/28 px-3 py-2 text-sm text-emerald-50 shadow-sm transition duration-150 ease-out placeholder:text-emerald-50/36 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black ${
             prefix ? "pl-7" : ""
-          } ${suffix ? "pr-9" : ""} ${error ? "border-red-500" : "border-neutral-300"}`}
+          } ${suffix ? "pr-9" : ""} ${error ? "border-red-400/70" : "border-emerald-300/18"}`}
         />
         {suffix ? (
-          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-neutral-500">
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-emerald-50/52">
             {suffix}
           </span>
         ) : null}
       </div>
       {error ? (
-        <p id={`${id}-error`} className="text-xs text-red-700">
+        <p id={`${id}-error`} className="text-xs text-red-300">
           {error}
         </p>
       ) : (
-        <p id={`${id}-hint`} className="text-xs text-neutral-600">
+        <p id={`${id}-hint`} className="text-xs text-emerald-50/52">
           {helperText}
         </p>
       )}
@@ -240,7 +235,7 @@ function SegmentedControl<TValue extends string | number>({
 }: SegmentedControlProps<TValue>) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium text-neutral-900">{legend}</legend>
+      <legend className="text-sm font-medium text-emerald-50">{legend}</legend>
       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
         {options.map((option) => {
           const isSelected = option.value === value;
@@ -250,10 +245,10 @@ function SegmentedControl<TValue extends string | number>({
               type="button"
               aria-pressed={isSelected}
               onClick={() => onChange(option.value)}
-              className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
+              className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black ${
                 isSelected
-                  ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                  : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100"
+                  ? "border-emerald-300/70 bg-emerald-300/16 text-emerald-50 shadow-[0_0_18px_rgb(52_211_153_/_0.12)]"
+                  : "border-emerald-300/16 bg-black/22 text-emerald-50/68 hover:border-emerald-300/34 hover:bg-emerald-300/8"
               }`}
             >
               {option.label}

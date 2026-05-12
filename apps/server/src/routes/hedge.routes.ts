@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { HedgeService } from "../services/hedge.service.js";
 
@@ -69,39 +69,42 @@ export function createHedgeRouter(hedgeService = new HedgeService()): Router {
     const parsed = hedgeRoutesSchema.safeParse(request.body);
 
     if (!parsed.success) {
-      response.status(400).json({ error: "Invalid hedge route input.", details: parsed.error.flatten().fieldErrors });
+      response.status(400).json({ error: "Invalid protection route input.", details: parsed.error.flatten().fieldErrors });
       return;
     }
 
     try {
       response.json(await hedgeService.getRoutes(parsed.data));
     } catch (error) {
-      response.status(502).json({ error: error instanceof Error ? error.message : "Unable to compare hedge routes." });
+      response.status(502).json({ error: error instanceof Error ? error.message : "Unable to compare protection routes." });
     }
   });
 
-  router.post("/paper/execute", async (request, response) => {
+  async function handleOpenProtection(request: Request, response: Response) {
     const parsed = paperExecuteSchema.safeParse(request.body);
 
     if (!parsed.success) {
       response
         .status(400)
-        .json({ error: "Invalid paper hedge execution input.", details: parsed.error.flatten().fieldErrors });
+        .json({ error: "Invalid protection request.", details: parsed.error.flatten().fieldErrors });
       return;
     }
 
     try {
       response.json(await hedgeService.paperExecute(parsed.data));
     } catch (error) {
-      response.status(409).json({ error: error instanceof Error ? error.message : "Unable to paper execute hedge." });
+      response.status(409).json({ error: error instanceof Error ? error.message : "Unable to open protection." });
     }
-  });
+  }
+
+  router.post("/open-protection", handleOpenProtection);
+  router.post("/paper/execute", handleOpenProtection);
 
   router.post("/preview", async (request, response) => {
     const parsed = previewSchema.safeParse(request.body);
 
     if (!parsed.success) {
-      response.status(400).json({ error: "Invalid hedge preview input.", details: parsed.error.flatten().fieldErrors });
+      response.status(400).json({ error: "Invalid protection input.", details: parsed.error.flatten().fieldErrors });
       return;
     }
 
@@ -112,7 +115,7 @@ export function createHedgeRouter(hedgeService = new HedgeService()): Router {
           : await hedgeService.previewSolExposure(parsed.data.input)
       );
     } catch (error) {
-      response.status(502).json({ error: error instanceof Error ? error.message : "Unable to preview hedge." });
+      response.status(502).json({ error: error instanceof Error ? error.message : "Unable to load protection." });
     }
   });
 
@@ -120,14 +123,14 @@ export function createHedgeRouter(hedgeService = new HedgeService()): Router {
     const parsed = openSchema.safeParse(request.body);
 
     if (!parsed.success) {
-      response.status(400).json({ error: "Invalid hedge open input.", details: parsed.error.flatten().fieldErrors });
+      response.status(400).json({ error: "Invalid protection open input.", details: parsed.error.flatten().fieldErrors });
       return;
     }
 
     try {
       response.json(await hedgeService.open(parsed.data));
     } catch (error) {
-      response.status(409).json({ error: error instanceof Error ? error.message : "Unable to open hedge." });
+      response.status(409).json({ error: error instanceof Error ? error.message : "Unable to open protection." });
     }
   });
 
@@ -137,7 +140,7 @@ export function createHedgeRouter(hedgeService = new HedgeService()): Router {
     if (!parsed.success) {
       response
         .status(400)
-        .json({ error: "Invalid Flash hedge transaction input.", details: parsed.error.flatten().fieldErrors });
+        .json({ error: "Invalid Flash protection input.", details: parsed.error.flatten().fieldErrors });
       return;
     }
 
@@ -146,7 +149,7 @@ export function createHedgeRouter(hedgeService = new HedgeService()): Router {
     } catch (error) {
       response
         .status(502)
-        .json({ error: error instanceof Error ? error.message : "Unable to build Flash hedge transaction." });
+        .json({ error: error instanceof Error ? error.message : "Unable to prepare Flash protection." });
     }
   });
 

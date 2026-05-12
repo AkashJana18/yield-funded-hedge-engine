@@ -19,78 +19,78 @@ export function MetricsPanel({ metrics, isLoading }: MetricsPanelProps) {
 
   if (!metrics) {
     return (
-      <section className="rounded-lg border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-600">
-        Metrics will appear after the first run.
+      <section className="glass-panel-soft rounded-lg border-dashed p-6 text-sm text-emerald-50/62">
+        Protection metrics appear after the first run.
       </section>
     );
   }
 
-  const hedgedOutperforms = metrics.protectionBenefit > 0;
+  const protectionImprovedOutcome = metrics.protectionBenefit > 0;
 
   return (
     <section className="space-y-4">
       <div
         className={`rounded-lg border p-4 shadow-sm ${
-          hedgedOutperforms
-            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-            : "border-amber-200 bg-amber-50 text-amber-950"
+          protectionImprovedOutcome
+            ? "border-emerald-300/24 bg-emerald-300/10 text-emerald-50"
+            : "border-amber-300/24 bg-amber-300/10 text-amber-50"
         }`}
       >
         <div className="flex items-start gap-3">
-          <ShieldCheck className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
+          <ShieldCheck className="mt-0.5 h-5 w-5 flex-none text-emerald-300" aria-hidden="true" />
           <div>
             <p className="text-sm font-semibold">
-              {hedgedOutperforms ? "Hedged outperformed" : "Unhedged outperformed"}
+              {protectionImprovedOutcome ? "Protection improved outcome" : "Market exposure led outcome"}
             </p>
-            <p className="mt-1 text-sm">
-              Protection benefit: {formatSignedCurrency(metrics.protectionBenefit)} versus the unhedged path.
+            <p className="mt-1 text-sm text-emerald-50/70">
+              Protection benefit: {formatSignedCurrency(metrics.protectionBenefit)} versus holding SOL without a floor.
             </p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon={<BadgeDollarSign className="h-5 w-5" aria-hidden="true" />}
-          label="Final unhedged"
+          label="Without protection"
           value={formatCurrencyPrecise(metrics.finalUnhedged)}
           detail={formatSignedCurrency(metrics.netReturnUnhedged)}
           tone="red"
         />
         <MetricCard
           icon={<ShieldCheck className="h-5 w-5" aria-hidden="true" />}
-          label="Final hedged"
+          label="With protection"
           value={formatCurrencyPrecise(metrics.finalHedged)}
           detail={formatSignedCurrency(metrics.netReturnHedged)}
           tone="green"
         />
         <MetricCard
           icon={<TrendingUp className="h-5 w-5" aria-hidden="true" />}
-          label="Net APY"
+          label="Projected return"
           value={formatSignedPercent(metrics.annualizedApyHedged)}
-          detail={`Unhedged ${formatSignedPercent(metrics.annualizedApyUnhedged)}`}
+          detail={`Unprotected ${formatSignedPercent(metrics.annualizedApyUnhedged)}`}
           tone="neutral"
         />
         <MetricCard
           icon={<ArrowDownToLine className="h-5 w-5" aria-hidden="true" />}
           label="Max drawdown"
           value={formatPercent(metrics.maxDrawdownHedged)}
-          detail={`Unhedged ${formatPercent(metrics.maxDrawdownUnhedged)}`}
+          detail={`Unprotected ${formatPercent(metrics.maxDrawdownUnhedged)}`}
           tone="neutral"
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <MetricCard
           icon={<LineChart className="h-5 w-5" aria-hidden="true" />}
-          label="Hedged APY"
+          label="Protected APY"
           value={formatSignedPercent(metrics.annualizedApyHedged)}
           detail="Annualized over the selected period"
           tone="green"
         />
         <MetricCard
           icon={<LineChart className="h-5 w-5" aria-hidden="true" />}
-          label="Unhedged APY"
+          label="Unprotected APY"
           value={formatSignedPercent(metrics.annualizedApyUnhedged)}
           detail="Annualized over the selected period"
           tone="red"
@@ -111,30 +111,30 @@ interface MetricCardProps {
 function MetricCard({ icon, label, value, detail, tone }: MetricCardProps) {
   const toneClass =
     tone === "green"
-      ? "bg-emerald-50 text-emerald-700"
+      ? "border-emerald-300/22 bg-emerald-300/10 text-emerald-300"
       : tone === "red"
-        ? "bg-red-50 text-red-700"
-        : "bg-neutral-100 text-neutral-700";
+        ? "border-red-300/20 bg-red-400/10 text-red-300"
+        : "border-emerald-300/16 bg-emerald-50/6 text-emerald-100";
 
   return (
-    <article className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className={`flex h-10 w-10 items-center justify-center rounded-md ${toneClass}`}>{icon}</div>
-      <p className="mt-4 text-sm font-medium text-neutral-600">{label}</p>
-      <p className="mt-1 font-mono text-2xl font-semibold text-neutral-950">{value}</p>
-      <p className="mt-2 text-sm text-neutral-600">{detail}</p>
+    <article className="glass-panel-soft rounded-lg p-4 transition duration-150 ease-out hover:-translate-y-0.5 hover:border-emerald-300/26">
+      <div className={`flex h-10 w-10 items-center justify-center rounded-md border ${toneClass}`}>{icon}</div>
+      <p className="mt-4 text-sm font-medium text-emerald-50/62">{label}</p>
+      <p className="mt-1 font-mono text-2xl font-semibold text-emerald-50 tabular-nums">{value}</p>
+      <p className="mt-2 text-sm text-emerald-50/56">{detail}</p>
     </article>
   );
 }
 
 function MetricsSkeleton() {
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="h-10 w-10 animate-pulse rounded-md bg-neutral-200" />
-          <div className="mt-4 h-4 w-28 animate-pulse rounded bg-neutral-200" />
-          <div className="mt-3 h-8 w-36 animate-pulse rounded bg-neutral-200" />
-          <div className="mt-3 h-4 w-32 animate-pulse rounded bg-neutral-200" />
+        <div key={index} className="glass-panel-soft rounded-lg p-4">
+          <div className="h-10 w-10 animate-pulse rounded-md bg-emerald-300/12" />
+          <div className="mt-4 h-4 w-28 animate-pulse rounded bg-emerald-300/12" />
+          <div className="mt-3 h-8 w-36 animate-pulse rounded bg-emerald-300/14" />
+          <div className="mt-3 h-4 w-32 animate-pulse rounded bg-emerald-300/12" />
         </div>
       ))}
     </section>

@@ -75,31 +75,15 @@ export function evaluateRisk(input: RiskEvaluationInput): RiskEvaluation {
     {
       code: "GENERAL_RISK",
       severity: "info",
-      message: "This builder creates a hedged position, not guaranteed protection."
+      message: "Protection reduces downside risk, but outcomes can vary with market conditions."
     }
   ];
-
-  if (input.mode === "paper") {
-    warnings.push({
-      code: "PAPER_MODE",
-      severity: "warning",
-      message: "Paper mode uses live market data but does not execute a real hedge."
-    });
-  }
-
-  if (!input.flashLiveEnabled) {
-    warnings.push({
-      code: "FLASH_DISABLED",
-      severity: "warning",
-      message: "Flash live execution is disabled by environment configuration."
-    });
-  }
 
   if (input.hedgeRatio > 0.75) {
     warnings.push({
       code: "HIGH_HEDGE_RATIO",
       severity: "warning",
-      message: "Hedge ratios above 75% leave less room for funding spikes and liquidation management."
+      message: "Higher protection levels require more active collateral management."
     });
   }
 
@@ -107,7 +91,7 @@ export function evaluateRisk(input: RiskEvaluationInput): RiskEvaluation {
     warnings.push({
       code: "INSUFFICIENT_MARGIN",
       severity: "danger",
-      message: "Wallet USDC is below the estimated margin required for the short."
+      message: "Wallet USDC is below the estimated collateral requirement."
     });
   }
 
@@ -115,7 +99,7 @@ export function evaluateRisk(input: RiskEvaluationInput): RiskEvaluation {
     warnings.push({
       code: "LIQUIDATION_TOO_CLOSE",
       severity: "danger",
-      message: "Liquidation is too close to the current SOL price for this setup."
+      message: "The protection floor is close to the current SOL price."
     });
   }
 
@@ -123,7 +107,7 @@ export function evaluateRisk(input: RiskEvaluationInput): RiskEvaluation {
     warnings.push({
       code: "FUNDING_OVER_YIELD",
       severity: "warning",
-      message: "Estimated funding cost is higher than staking yield."
+      message: "Annual protection cost is higher than the selected holding yield."
     });
   }
 

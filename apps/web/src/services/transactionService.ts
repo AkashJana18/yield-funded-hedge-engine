@@ -45,7 +45,7 @@ export async function executeVersionedTransaction(
   });
 
   if (simulation.value.err) {
-    throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    throw new Error(`Transaction validation failed: ${JSON.stringify(simulation.value.err)}`);
   }
 
   const signed = await wallet.signTransaction(transaction);
@@ -73,7 +73,7 @@ export async function executeLegacyTransaction(
   const simulation = await connection.simulateTransaction(transaction, undefined, true);
 
   if (simulation.value.err) {
-    throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    throw new Error(`Transaction validation failed: ${JSON.stringify(simulation.value.err)}`);
   }
 
   const signed = await wallet.signTransaction(transaction);
